@@ -3,9 +3,11 @@ import logging
 import traceback
 import sys
 
-from flask import Flask, jsonify, request
+from flask import Flask, Blueprint, current_app, jsonify, request, redirect, abort
 import youtube_dl
 from youtube_dl.version import __version__ as youtube_dl_version
+
+from .version import __version__
 
 
 if not hasattr(sys.stderr, 'isatty'):
@@ -26,7 +28,7 @@ def get_videos(url, extra_params):
     ydl_params = {
         'format': 'best',
         'cachedir': False,
-        'logger': app.logger.getChild('youtube-dl'),
+        'logger': current_app.logger.getChild('youtube-dl'),
     }
     ydl_params.update(extra_params)
     ydl = SimpleYDL(ydl_params)
@@ -49,11 +51,11 @@ def flatten_result(result):
     return videos
 
 
-app = Flask(__name__)
+api = Blueprint('api', __name__)
 
 
 def route_api(subpath, *args, **kargs):
-    return app.route('/api/' + subpath, *args, **kargs)
+    return api.route('/api/' + subpath, *args, **kargs)
 
 
 def set_access_control(f):
@@ -65,8 +67,8 @@ def set_access_control(f):
     return wrapper
 
 
-@app.errorhandler(youtube_dl.utils.DownloadError)
-@app.errorhandler(youtube_dl.utils.ExtractorError)
+@api.errorhandler(youtube_dl.utils.DownloadError)
+@api.errorhandler(youtube_dl.utils.ExtractorError)
 def handle_youtube_dl_error(error):
     logging.error(traceback.format_exc())
     result = jsonify({'error': str(error)})
@@ -80,12 +82,20 @@ class WrongParameterTypeError(ValueError):
         super(WrongParameterTypeError, self).__init__(message)
 
 
-@app.errorhandler(WrongParameterTypeError)
+@api.errorhandler(WrongParameterTypeError)
 def handle_wrong_parameter(error):
     logging.error(traceback.format_exc())
     result = jsonify({'error': str(error)})
     result.status_code = 400
     return result
+
+
+@api.before_request
+def block_on_user_agent():
+    user_agent = request.user_agent.string
+    forbidden_uas = current_app.config.get('FORBIDDEN_USER_AGENTS', [])
+    if user_agent in forbidden_uas:
+        abort(429)
 
 
 def query_bool(value, name, default=None):
@@ -101,6 +111,7 @@ def query_bool(value, name, default=None):
 
 
 ALLOWED_EXTRA_PARAMS = {
+    'format': str,
     'playliststart': int,
     'playlistend': int,
     'playlist_items': str,
@@ -115,9 +126,7 @@ ALLOWED_EXTRA_PARAMS = {
 }
 
 
-@route_api('info')
-@set_access_control
-def info():
+def get_result():
     url = request.args['url']
     extra_params = {}
     for k, v in request.args.items():
@@ -128,17 +137,29 @@ def info():
             elif convertf == list:
                 convertf = lambda x: x.split(',')
             extra_params[k] = convertf(v)
-    result = get_videos(url, extra_params)
+    return get_videos(url, extra_params)
+
+
+@route_api('info')
+@set_access_control
+def info():
+    url = request.args['url']
+    result = get_result()
     key = 'info'
     if query_bool(request.args.get('flatten'), 'flatten', False):
         result = flatten_result(result)
         key = 'videos'
     result = {
-        'youtube-dl.version': youtube_dl_version,
         'url': url,
         key: result,
     }
     return jsonify(result)
+
+
+@route_api('play')
+def play():
+    result = flatten_result(get_result())
+    return redirect(result[0]['url'])
 
 
 @route_api('extractors')
@@ -149,3 +170,17 @@ def list_extractors():
         'working': ie.working(),
     } for ie in youtube_dl.gen_extractors()]
     return jsonify(extractors=ie_list)
+
+
+@route_api('version')
+@set_access_control
+def version():
+    result = {
+        'youtube-dl': youtube_dl_version,
+        'youtube-dl-api-server': __version__,
+    }
+    return jsonify(result)
+
+app = Flask(__name__)
+app.register_blueprint(api)
+app.config.from_pyfile('../application.cfg', silent=True)

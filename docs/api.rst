@@ -53,6 +53,49 @@ API methods
     .. include:: example_info_flatten.rst.inc
 
 
+.. http:get:: /api/play
+
+    Extract the info and redirect to the URL of the first video found for the requested URL.
+    Useful for media players that accept HTTP URLs.
+    Accepts the same parameters as :http:get:`/api/info`.
+
+    :status 302: On success
+    :status 400: For invalid query parameters
+    :status 500: If the extraction fails
+
+    .. versionadded:: 0.3
+
+        Added endpoint.
+
+    |ex-request|
+
+    .. sourcecode:: http
+
+        GET /api/play?url=http://www.ted.com/talks/dan_dennett_on_our_consciousness.html HTTP/1.1
+
+    |ex-response|
+
+    .. sourcecode:: http
+
+        HTTP/1.0 302 FOUND
+        Content-Type: text/html; charset=utf-8
+        Location: http://download.ted.com/talks/DanDennett_2003-1500k.mp4?dnt
+
+    |ex-request|
+
+    .. sourcecode:: http
+
+        GET /api/play?url=http://www.ted.com/talks/dan_dennett_on_our_consciousness.html&format=bestaudio HTTP/1.1
+
+    |ex-response|
+
+    .. sourcecode:: http
+
+        HTTP/1.0 302 FOUND
+        Content-Type: text/html; charset=utf-8
+        Location: https://hls.ted.com/videos/DanDennett_2003/audio/600k.m3u8?uniqueId=5ed2e870
+
+
 .. http:get:: /api/extractors
 
     Get the available extractors
@@ -88,6 +131,39 @@ API methods
                 ...
             ]
 
+        }
+
+
+.. http:get:: /api/version
+
+    Get the youtube-dl and youtube-dl-api-server version
+
+    :resheader Content-Type: ``application/json``
+    :resheader Access-Control-Allow-Origin: ``*``
+    :status 200: On success
+
+    .. versionadded:: 0.3
+
+        Added endpoint.
+
+
+    |ex-request|
+
+    .. sourcecode:: http
+
+        GET /api/version HTTP/1.1
+
+    |ex-response|
+
+    .. sourcecode:: http
+
+        HTTP/1.1 200 OK
+        Access-Control-Allow-Origin: *
+        Content-Type: application/json
+
+        {
+            "youtube-dl": "2016.04.19",
+            "youtube-dl-api-server": "0.2"
         }
 
 Test server
